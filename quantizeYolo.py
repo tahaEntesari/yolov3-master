@@ -1,6 +1,7 @@
 import argparse
 import time
 from pathlib import Path
+import sys
 
 import cv2
 import torch
@@ -13,25 +14,15 @@ from utils.general import check_img_size, check_requirements, non_max_suppressio
     xyxy2xywh, strip_optimizer, set_logging, increment_path
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized
+from Utilities import *
+from models.yolo import Model
+from utils.datasets import letterbox
+import numpy as np
 
 backend = 'fbgemm'
 if 'qnnpack' in torch.backends.quantized.supported_engines:
     backend = 'qnnpack'
 torch.backends.quantized.engine = backend
-
-def replace_relu(module):
-    import torch.nn as nn
-    reassign = {}
-    for name, mod in module.named_children():
-        replace_relu(mod)
-        # Checking for explicit type instead of instance
-        # as we only want to replace modules of the exact type
-        # not inherited classes
-        if type(mod) == nn.LeakyReLU:
-            reassign[name] = nn.ReLU(inplace=False)
-
-    for key, value in reassign.items():
-        module._modules[key] = value
 
 
 def detect(save_img=False):
@@ -46,21 +37,22 @@ def detect(save_img=False):
     # Initialize
     set_logging()
     # device = select_device(opt.device)
-    device=torch.device("cpu")
-    half = device.type != 'cpu'  # half precision only supported on CUDA
+    device = torch.device("cpu")
 
     # Load model
-    model = attempt_load(weights, map_location=device)  # load FP32 model
-    replace_relu(model)
-    imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
-    if half:
-        model.half()  # to FP16
-
-    # Second-stage classifier
-    classify = False
-    if classify:
-        modelc = load_classifier(name='resnet101', n=2)  # initialize
-        modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model']).to(device).eval()
+    if type(weights) != list:
+        weights = [weights]
+    tempModel = attempt_load(weights, map_location=device)  # load FP32 model
+    imgsz = check_img_size(imgsz, s=tempModel.stride.max())  # check img_size
+    if weights[0] == "yolov3.pt":
+        yaml = "yolov3.yaml"
+        detectLayerIndex = 28
+    elif weights[0] == "yolov3-tiny.pt":
+        yaml = "yolov3-tiny.yaml"
+        detectLayerIndex = 20
+    yaml = "./models/" + yaml
+    model = Model(yaml)
+    model.load_state_dict(tempModel.state_dict())
 
     # Set Dataloader
     vid_path, vid_writer = None, None
@@ -72,6 +64,60 @@ def detect(save_img=False):
         save_img = True
         dataset = LoadImages(source, img_size=imgsz)
 
+    ###################################################################################################################
+
+    ###################################################################################################################
+    # it seems that this is not necessary
+    # model.qconfig = torch.quantization.get_default_qconfig(backend)
+    # for i in range(28):
+    #     model.model[i].qconfig = torch.quantization.get_default_qconfig(backend)
+    # model.qconfig = torch.quantization.get_default_qconfig(backend)
+    # """
+    # VERY IMPORTANT LINE:
+    # """
+    model.eval()
+    # # floatNet.eval()
+
+    fuseAll(model)
+    # print(model)
+    # sys.exit(0)
+
+    #
+    newModel = NewModel(model, detectLayerIndex)
+    # ATTENTION: although you have defined
+    newModel.quant.qconfig = torch.quantization.get_default_qconfig(backend)
+    newModel.dequant.qconfig = torch.quantization.get_default_qconfig(backend)
+
+    for i in range(detectLayerIndex):
+        newModel.model.qconfig = torch.quantization.get_default_qconfig(backend)
+    # newModel.qconfig = torch.quantization.get_default_qconfig(backend)
+    # print(newModel)
+    newModel.eval()
+    #
+    mQuan = torch.quantization.prepare(newModel)
+    mQuan.eval()
+    count = 0
+    for path, img, im0s, vid_cap in dataset:
+        count += 1
+        if count >= 2:
+            break
+        img = torch.from_numpy(img).to(device)
+        img = img.float()  # uint8 to fp16/32
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        if img.ndimension() == 3:
+            img = img.unsqueeze(0)
+
+        # Inference
+        _ = mQuan(img)
+    mQuan = torch.quantization.convert(mQuan)
+    print("Quantization finished\n" + "******" * 10)
+    print("Original model:")
+    print_size_of_model(newModel)
+    print("Quantized:")
+    print_size_of_model(mQuan)
+    # sys.exit(0)
+    # print(mQuan)
+    ###################################################################################################################
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
@@ -79,25 +125,23 @@ def detect(save_img=False):
     # Run inference
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
-    _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
+    _ = model(img) if device.type != 'cpu' else None  # run once
+
+    model = mQuan
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
+        img = img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
 
         # Inference
         t1 = time_synchronized()
-        pred = model(img, augment=opt.augment)[0]
+        pred = model(img)[0]
 
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = time_synchronized()
-
-        # Apply Classifier
-        if classify:
-            pred = apply_classifier(pred, modelc, img, im0s)
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image

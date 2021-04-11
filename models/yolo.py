@@ -35,6 +35,11 @@ class Detect(nn.Module):
         self.register_buffer('anchors', a)  # shape(nl,na,2)
         self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
+        # self.scalarMulFunctional = nn.quantized.FloatFunctional()
+        # self.scalarAddFunctional = nn.quantized.FloatFunctional()
+        # self.addFunctional = nn.quantized.FloatFunctional()
+        # self.scalarMulFunctional2 = nn.quantized.FloatFunctional()
+        # self.dequant = [torch.quantization.DeQuantStub() for i in range(self.nl)]
 
     def forward(self, x):
         # x = x.copy()  # for profiling
@@ -121,6 +126,9 @@ class Model(nn.Module):
     def forward_once(self, x, profile=False):
         y, dt = [], []  # outputs
         for m in self.model:
+            if type(m) == nn.Identity and m.FAF:
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+                break
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
@@ -131,7 +139,11 @@ class Model(nn.Module):
                     _ = m(x)
                 dt.append((time_synchronized() - t) * 100)
                 print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
-
+            # print(x)
+            # print(m)
+            if type(m) == nn.ZeroPad2d:
+                print("zerooooooooooooooooooooo pppppppppppppppppaaaaaaaaaaaaaaaaaaaaaaaaaddddddddddddddddddd")
+                continue
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
 
