@@ -52,6 +52,9 @@ def detect(save_img=False):
         detectLayerIndex = 20
     yaml = "./models/" + yaml
     model = Model(yaml)
+    # print(tempModel.state_dict().keys())
+    # print(model.state_dict().keys())
+    # sys.exit(0)
     model.load_state_dict(tempModel.state_dict())
 
     # Set Dataloader
@@ -87,7 +90,7 @@ def detect(save_img=False):
     # ATTENTION: although you have defined
     if not quantize:
         model.eval()
-        mQuan = model
+        mQuan = tempModel
     else:
         newModel = NewModel(model, detectLayerIndex)
         newModel.quant.qconfig = torch.quantization.get_default_qconfig(backend)
