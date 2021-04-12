@@ -38,6 +38,7 @@ class Conv(nn.Module):
         self.negationFunctional = nn.quantized.FloatFunctional()
 
     def forward(self, x):
+
         temp = self.bn(self.conv(x))
         return self.addFuntional.add(self.act(temp),
                                      self.scalarMultFunctional.mul_scalar(

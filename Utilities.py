@@ -16,16 +16,22 @@ class NewModel(nn.Module):
     def __init__(self, model, detectLayerIndex):
         super(NewModel, self).__init__()
         self.quant = torch.quantization.QuantStub()
-        self.dequant = torch.quantization.DeQuantStub()
         # self.model = model
         self.model = copy.deepcopy(model)
         self.detect = self.model.model[detectLayerIndex]
         self.model.model[detectLayerIndex] = nn.Identity()
         self.model.model[detectLayerIndex].FAF = True
         self.model.model[detectLayerIndex].f = self.detect.f
+        if detectLayerIndex == 20:
+            self.dequant = [torch.quantization.DeQuantStub(),
+                            torch.quantization.DeQuantStub()]
+        elif detectLayerIndex == 28:
+            self.dequant = [torch.quantization.DeQuantStub(),
+                            torch.quantization.DeQuantStub(),
+                            torch.quantization.DeQuantStub()]
 
     def forward(self, x):
-        features = [self.dequant(y) for y in self.model(self.quant(x))]
+        features = [dequant(y) for dequant, y in zip(self.dequant, self.model(self.quant(x)))]
         return self.detect(features)
 
 
