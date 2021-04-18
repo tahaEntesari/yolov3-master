@@ -42,21 +42,29 @@ def detect(save_img=False):
     # Load model
     if type(weights) != list:
         weights = [weights]
-    tempModel = attempt_load(weights, map_location=device)  # load FP32 model
-    imgsz = check_img_size(imgsz, s=tempModel.stride.max())  # check img_size
-    if weights[0] == "yolov3.pt":
-        yaml = "yolov3.yaml"
-        detectLayerIndex = 28
-    elif weights[0] == "yolov3-tiny.pt":
-        yaml = "yolov3-tiny.yaml"
+    # tempModel = attempt_load(weights, map_location=device)  # load FP32 model
+
+    # if weights[0] == "yolov3.pt":
+    #     yaml = "./models/yolov3.yaml"
+    #     detectLayerIndex = 28
+    #     model = Model(yaml)
+    # elif weights[0] == "yolov3-tiny.pt":
+    #     yaml = "./models/yolov3-tiny.yaml"
+    #     detectLayerIndex = 20
+    #     model = Model(yaml)
+    # else:
+    if "tiny" in weights[0].lower():
         detectLayerIndex = 20
-    yaml = "./models/" + yaml
-    model = Model(yaml)
+    else:
+        detectLayerIndex = 28
+    model = attempt_load(weights, map_location=device)
+
     # print(tempModel.state_dict().keys())
     # print(model.state_dict().keys())
     # sys.exit(0)
-    model.load_state_dict(tempModel.state_dict())
+    # model.load_state_dict(tempModel.state_dict())
 
+    imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
     # Set Dataloader
     vid_path, vid_writer = None, None
     if webcam:
@@ -90,7 +98,8 @@ def detect(save_img=False):
     # ATTENTION: although you have defined
     if not quantize:
         model.eval()
-        mQuan = tempModel
+        # mQuan = tempModel
+        mQuan = model
     else:
         newModel = NewModel(model, detectLayerIndex)
         newModel.quant.qconfig = torch.quantization.get_default_qconfig(backend)
