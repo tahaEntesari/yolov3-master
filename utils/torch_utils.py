@@ -141,7 +141,8 @@ def initialize_weights(model):
             m.eps = 1e-3
             m.momentum = 0.03
         elif t in [nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6]:
-            m.inplace = True
+            # m.inplace = True  # I have changed this :))))))
+            pass
 
 
 def find_modules(model, mclass=nn.Conv2d):

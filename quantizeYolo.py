@@ -42,27 +42,27 @@ def detect(save_img=False):
     # Load model
     if type(weights) != list:
         weights = [weights]
-    # tempModel = attempt_load(weights, map_location=device)  # load FP32 model
+    tempModel = attempt_load(weights, map_location=device)  # load FP32 model
 
-    # if weights[0] == "yolov3.pt":
-    #     yaml = "./models/yolov3.yaml"
-    #     detectLayerIndex = 28
-    #     model = Model(yaml)
-    # elif weights[0] == "yolov3-tiny.pt":
-    #     yaml = "./models/yolov3-tiny.yaml"
-    #     detectLayerIndex = 20
-    #     model = Model(yaml)
-    # else:
-    if "tiny" in weights[0].lower():
-        detectLayerIndex = 20
-    else:
+    if weights[0] == "yolov3.pt":
+        yaml = "./models/yolov3.yaml"
         detectLayerIndex = 28
-    model = attempt_load(weights, map_location=device)
+        model = Model(yaml)
+    elif weights[0] == "yolov3-tiny.pt":
+        yaml = "./models/yolov3-tiny.yaml"
+        detectLayerIndex = 20
+        model = Model(yaml)
+    # if "tiny" in weights[0].lower():
+    #     detectLayerIndex = 20
+    # else:
+    #     detectLayerIndex = 28
+    # model = attempt_load(weights, map_location=device)
 
     # print(tempModel.state_dict().keys())
     # print(model.state_dict().keys())
     # sys.exit(0)
-    # model.load_state_dict(tempModel.state_dict())
+    model.load_state_dict(tempModel.state_dict())
+    model.names = tempModel.names
 
     imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
     # Set Dataloader
@@ -94,7 +94,7 @@ def detect(save_img=False):
     # sys.exit(0)
 
     #
-    quantize = False
+    quantize = True
     # ATTENTION: although you have defined
     if not quantize:
         model.eval()
@@ -102,12 +102,14 @@ def detect(save_img=False):
         mQuan = model
     else:
         newModel = NewModel(model, detectLayerIndex)
+        newModel.qconfig = torch.quantization.get_default_qconfig(backend)
         newModel.quant.qconfig = torch.quantization.get_default_qconfig(backend)
-        newModel.dequant.qconfig = torch.quantization.get_default_qconfig(backend)
-
+        for dequant in newModel.deQuant:
+            dequant.qconfig = torch.quantization.get_default_qconfig(backend)
         for i in range(detectLayerIndex):
-            newModel.model.qconfig = torch.quantization.get_default_qconfig(backend)
-        # newModel.qconfig = torch.quantization.get_default_qconfig(backend)
+            newModel.model.model[i].qconfig = torch.quantization.get_default_qconfig(backend)
+
+
         # print(newModel)
         newModel.eval()
         #
@@ -127,6 +129,8 @@ def detect(save_img=False):
             # Inference
             _ = mQuan(img)
         mQuan = torch.quantization.convert(mQuan)
+        print(mQuan)
+        mQuan = NewModel2(model, detectLayerIndex, mQuan)
         print("Quantization finished\n" + "******" * 10)
         print("Original model:")
         print_size_of_model(newModel)

@@ -115,10 +115,4 @@ def attempt_load(weights, map_location=None):
     if type(weights) == list:
         weights = weights[0]
     model = torch.load(weights, map_location=map_location)['model'].float()
-    # Compatibility updates
-    for m in model.modules():
-        if type(m) in [nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6]:
-            m.inplace = True  # pytorch 1.7.0 compatibility
-        elif type(m) is Conv:
-            m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatibility
     return model

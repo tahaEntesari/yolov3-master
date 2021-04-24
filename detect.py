@@ -14,20 +14,6 @@ from utils.general import check_img_size, check_requirements, non_max_suppressio
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized
 
-def replace_relu(module):
-    import torch.nn as nn
-    reassign = {}
-    for name, mod in module.named_children():
-        replace_relu(mod)
-        # Checking for explicit type instead of instance
-        # as we only want to replace modules of the exact type
-        # not inherited classes
-        if type(mod) == nn.LeakyReLU:
-            reassign[name] = nn.ReLU(inplace=False)
-
-    for key, value in reassign.items():
-        module._modules[key] = value
-
 
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
@@ -41,7 +27,7 @@ def detect(save_img=False):
     # Initialize
     set_logging()
     # device = select_device(opt.device)
-    device=torch.device("cpu")
+    device = torch.device("cpu")
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model

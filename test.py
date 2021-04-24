@@ -17,7 +17,7 @@ from utils.loss import compute_loss
 from utils.metrics import ap_per_class, ConfusionMatrix
 from utils.plots import plot_images, output_to_target, plot_study_txt
 from utils.torch_utils import select_device, time_synchronized
-
+from models.yolo import Model
 
 def test(data,
          weights=None,
@@ -52,7 +52,15 @@ def test(data,
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
-        model = attempt_load(weights, map_location=device)  # load FP32 model
+        # model = attempt_load(weights, map_location=device)  # load FP32 model
+        temp = attempt_load(weights, map_location=device)  # load FP32 model
+        model = Model("./models/yolov3.yaml")
+        model.load_state_dict(temp.state_dict())
+        # model = torch.load("runs/train/leakyRelu2/weights/best.pt", map_location=torch.device("cpu"))['model'].float()
+        # temp = torch.load("runs/train/simpleRelu2/weights/best.pt", map_location=torch.device("cpu"))['model'].float()
+        # model = Model("./models/yolov3.yaml")
+        # model.load_state_dict(temp.state_dict())
+        # model = torch.load("runs/train/simpleRelu2/weights/best.pt", map_location=torch.device("cpu"))['model'].float()
         imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
 
         # Multi-GPU disabled, incompatible with .half() https://github.com/ultralytics/yolov5/issues/99
