@@ -126,9 +126,13 @@ class Model(nn.Module):
     def forward_once(self, x, profile=False):
         y, dt = [], []  # outputs
         for m in self.model:
-            if type(m) == nn.Identity and m.FAF:
-                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-                break
+            if type(m) == nn.Identity and hasattr(m, "breakHere"):
+                if m.breakHere:
+                    if hasattr(m, "f"):
+                        x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+                    break
+                else:
+                    continue
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 

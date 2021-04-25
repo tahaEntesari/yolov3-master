@@ -1,23 +1,18 @@
 import argparse
 import time
 from pathlib import Path
-import sys
 
-import cv2
-import torch
 import torch.backends.cudnn as cudnn
 from numpy import random
 
+from Utilities import *
 from models.experimental import attempt_load
+from models.yolo import Model
 from utils.datasets import LoadStreams, LoadImages
-from utils.general import check_img_size, check_requirements, non_max_suppression, apply_classifier, scale_coords, \
+from utils.general import check_img_size, check_requirements, non_max_suppression, scale_coords, \
     xyxy2xywh, strip_optimizer, set_logging, increment_path
 from utils.plots import plot_one_box
-from utils.torch_utils import select_device, load_classifier, time_synchronized
-from Utilities import *
-from models.yolo import Model
-from utils.datasets import letterbox
-import numpy as np
+from utils.torch_utils import time_synchronized
 
 backend = 'fbgemm'
 if 'qnnpack' in torch.backends.quantized.supported_engines:
@@ -126,8 +121,8 @@ def detect(save_img=False):
                     img = img.unsqueeze(0)
 
                 # Inference
-                # _ = newModelParent(img)
-                _ = tempModel(img)
+                _ = newModelParent(img)
+                # _=model(img)
 
             mQuan = torch.quantization.convert(mQuan)
             print(mQuan)

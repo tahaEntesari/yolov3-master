@@ -1,12 +1,14 @@
-import torch
-import torch.nn as nn
-import os
-from models.common import Conv
-from torch.quantization import fuse_modules
 import copy
-from torch.utils.data import Dataset, DataLoader
+import os
+
 import cv2
 import numpy as np
+import torch
+import torch.nn as nn
+from torch.quantization import fuse_modules
+from torch.utils.data import Dataset
+
+from models.common import Conv
 
 
 def fuseAll(model):
@@ -60,16 +62,22 @@ class NewModelTiny(nn.Module):
         zeroPadLayerIndex = 11
         self.quant1 = torch.quantization.QuantStub()
         self.quant2 = torch.quantization.QuantStub()
-        self.model1 = copy.deepcopy(model.model[:zeroPadLayerIndex])
-        self.model2 = copy.deepcopy(model.model[zeroPadLayerIndex + 1:])
-        self.model2[-1] = nn.Identity()
-        self.model2[-1].FAF = True
-        self.model2[-1].f = model.model[detectLayerIndex].f
+        self.model1 = copy.deepcopy(model)
+        self.model2 = copy.deepcopy(model)
+        for i in range(zeroPadLayerIndex, detectLayerIndex + 1):
+            self.model1.model[i] = nn.Identity()
+            self.model1.model[i].breakHere = True
+        for i in range(zeroPadLayerIndex + 1):
+            self.model2.model[i] = nn.Identity()
+            self.model2.model[i].breakHere = False
+        self.model2.model[detectLayerIndex] = nn.Identity()
+        self.model2.model[detectLayerIndex].breakHere = True
+        self.model2.model[detectLayerIndex].f = model.model[detectLayerIndex].f
         self.deQuant = torch.quantization.DeQuantStub()
 
     def forward(self, x, zeroPad, detect):
         print(self.model1)
-        print("********************\n"*10)
+        print("********************\n" * 10)
         print(self.model2)
         x = self.quant1(x)
         x = self.model1(x)
@@ -105,7 +113,7 @@ class NewModel(nn.Module):
         self.model = copy.deepcopy(model)
         # self.detect = self.model.model[detectLayerIndex]
         self.model.model[detectLayerIndex] = nn.Identity()
-        self.model.model[detectLayerIndex].FAF = True
+        self.model.model[detectLayerIndex].breakHere = True
         self.model.model[detectLayerIndex].f = model.model[detectLayerIndex].f
         self.deQuant = nn.ModuleList([torch.quantization.DeQuantStub(),
                                       torch.quantization.DeQuantStub(),
