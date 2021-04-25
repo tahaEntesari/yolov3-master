@@ -52,6 +52,8 @@ def detect(save_img=False):
         yaml = "./models/yolov3-tiny.yaml"
         detectLayerIndex = 20
         model = Model(yaml)
+        print(model)
+
     # if "tiny" in weights[0].lower():
     #     detectLayerIndex = 20
     # else:
@@ -101,43 +103,80 @@ def detect(save_img=False):
         # mQuan = tempModel
         mQuan = model
     else:
-        newModel = NewModel(model, detectLayerIndex)
-        newModel.qconfig = torch.quantization.get_default_qconfig(backend)
-        newModel.quant.qconfig = torch.quantization.get_default_qconfig(backend)
-        for dequant in newModel.deQuant:
-            dequant.qconfig = torch.quantization.get_default_qconfig(backend)
-        for i in range(detectLayerIndex):
-            newModel.model.model[i].qconfig = torch.quantization.get_default_qconfig(backend)
+        if "yolov3-tiny.pt" in weights:
+            newModel = NewModelTiny(model)
+
+            newModel.qconfig = torch.quantization.get_default_qconfig(backend)
+
+            newModel.eval()
+
+            #
+            mQuan = torch.quantization.prepare(newModel)
+            newModelParent = NewModelTinyParent(model, mQuan)
+            newModelParent.eval()
+            count = 0
+            for path, img, im0s, vid_cap in dataset:
+                count += 1
+                if count >= 2:
+                    break
+                img = torch.from_numpy(img).to(device)
+                img = img.float()  # uint8 to fp16/32
+                img /= 255.0  # 0 - 255 to 0.0 - 1.0
+                if img.ndimension() == 3:
+                    img = img.unsqueeze(0)
+
+                # Inference
+                # _ = newModelParent(img)
+                _ = tempModel(img)
+
+            mQuan = torch.quantization.convert(mQuan)
+            print(mQuan)
+            mQuan = NewModelTinyParent(model, mQuan)
+            print("Quantization finished\n" + "******" * 10)
+            print("Original model:")
+            print_size_of_model(newModel)
+            print("Quantized:")
+            print_size_of_model(mQuan)
+            # sys.exit(0)
+            # print(mQuan)
+        else:
+            newModel = NewModel(model, detectLayerIndex)
+            newModel.qconfig = torch.quantization.get_default_qconfig(backend)
+            newModel.quant.qconfig = torch.quantization.get_default_qconfig(backend)
+            for dequant in newModel.deQuant:
+                dequant.qconfig = torch.quantization.get_default_qconfig(backend)
+            for i in range(detectLayerIndex):
+                newModel.model.model[i].qconfig = torch.quantization.get_default_qconfig(backend)
 
 
-        # print(newModel)
-        newModel.eval()
-        #
-        mQuan = torch.quantization.prepare(newModel)
-        mQuan.eval()
-        count = 0
-        for path, img, im0s, vid_cap in dataset:
-            count += 1
-            if count >= 2:
-                break
-            img = torch.from_numpy(img).to(device)
-            img = img.float()  # uint8 to fp16/32
-            img /= 255.0  # 0 - 255 to 0.0 - 1.0
-            if img.ndimension() == 3:
-                img = img.unsqueeze(0)
+            # print(newModel)
+            newModel.eval()
+            #
+            mQuan = torch.quantization.prepare(newModel)
+            mQuan.eval()
+            count = 0
+            for path, img, im0s, vid_cap in dataset:
+                count += 1
+                if count >= 2:
+                    break
+                img = torch.from_numpy(img).to(device)
+                img = img.float()  # uint8 to fp16/32
+                img /= 255.0  # 0 - 255 to 0.0 - 1.0
+                if img.ndimension() == 3:
+                    img = img.unsqueeze(0)
 
-            # Inference
-            _ = mQuan(img)
-        mQuan = torch.quantization.convert(mQuan)
-        print(mQuan)
-        mQuan = NewModel2(model, detectLayerIndex, mQuan)
-        print("Quantization finished\n" + "******" * 10)
-        print("Original model:")
-        print_size_of_model(newModel)
-        print("Quantized:")
-        print_size_of_model(mQuan)
-        # sys.exit(0)
-        # print(mQuan)
+                # Inference
+                _ = mQuan(img)
+            mQuan = torch.quantization.convert(mQuan)
+            print(mQuan)
+            mQuan = NewModel2(model, detectLayerIndex, mQuan)
+            print("Quantization finished\n" + "******" * 10)
+            print("Original model:")
+            print_size_of_model(newModel)
+            print("Quantized:")
+            print_size_of_model(mQuan)
+            # sys.exit(0)
+            # print(mQuan)
     ###################################################################################################################
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names

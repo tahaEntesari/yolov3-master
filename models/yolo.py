@@ -141,9 +141,6 @@ class Model(nn.Module):
                 print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
             # print(x)
             # print(m)
-            if type(m) == nn.ZeroPad2d:
-                print("zerooooooooooooooooooooo pppppppppppppppppaaaaaaaaaaaaaaaaaaaaaaaaaddddddddddddddddddd")
-                continue
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
 

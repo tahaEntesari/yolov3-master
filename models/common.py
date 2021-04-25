@@ -38,13 +38,17 @@ class Conv(nn.Module):
         self.negationFunctional = nn.quantized.FloatFunctional()
 
     def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
 
-        temp = self.bn(self.conv(x))
-        return self.addFuntional.add(self.act(temp),
-                                     self.scalarMultFunctional.mul_scalar(
-                                         self.act(self.negationFunctional.mul_scalar(temp, -1)), -0.1))
-        # return self.act(temp) - 0.1 * self.act(-temp)
-        # return self.act(temp)
+        w = self.negationFunctional.mul_scalar(x, -1)
+        w = self.act(w)
+        w = self.scalarMultFunctional.mul_scalar(w, -0.1)
+        y = self.act(x)
+        w = self.addFuntional.add(y, w)
+        return w
+        # return self.act(x) - 0.1 * self.act(-x)
+        # return self.act(x)
 
     def fuseforward(self, x):
         temp = self.conv(x)
@@ -66,7 +70,15 @@ class Bottleneck(nn.Module):
         self.addFuntional = nn.quantized.FloatFunctional()
 
     def forward(self, x):
-        return self.addFuntional.add(x, self.cv2(self.cv1(x))) if self.add else self.cv2(self.cv1(x))
+        if self.add:
+            y = self.cv1(x)
+            y = self.cv2(y)
+            y = self.addFuntional.add(x, y)
+            return y
+        else:
+            x = self.cv1(x)
+            x = self.cv2(x)
+            return x
 
 
 class BottleneckCSP(nn.Module):
@@ -88,15 +100,21 @@ class BottleneckCSP(nn.Module):
         self.negationFunctional = nn.quantized.FloatFunctional()
 
     def forward(self, x):
-        y1 = self.cv3(self.m(self.cv1(x)))
+        y1 = self.cv1(x)
+        y1 = self.m(y1)
+        y1 = self.cv3(y1)
         y2 = self.cv2(x)
-        temp = self.bn(self.catFunctional.cat((y1, y2), dim=1))
-        temp2 = self.addFuntional.add(self.act(temp),
-                                      self.scalarMultFunctional.mul_scalar(
-                                          self.act(self.negationFunctional.mul_scalar(temp, -1)), -0.1))
-        # temp2 = self.act(temp)
-        # temp2 = self.act(temp) - 0.1 * self.act(-temp)
-        return self.cv4(temp2)
+        x = self.catFunctional.cat((y1, y2), dim=1)
+        x = self.bn(x)
+        w = self.negationFunctional.mul_scalar(x, -1)
+        w = self.act(w)
+        w = self.scalarMultFunctional.mul_scalar(w, -0.1)
+        y = self.act(x)
+        w = self.addFuntional.add(w, y)
+        w = self.cv4(w)
+        # temp2 = self.act(x)
+        # temp2 = self.act(x) - 0.1 * self.act(-x)
+        return w
 
 
 class C3(nn.Module):
@@ -112,7 +130,12 @@ class C3(nn.Module):
         self.catFunctional = nn.quantized.FloatFunctional()
 
     def forward(self, x):
-        return self.cv3(self.catFunctional.cat((self.m(self.cv1(x)), self.cv2(x)), dim=1))
+        y = self.cv1(x)
+        y = self.m(y)
+        x = self.cv2(x)
+        x = self.catFunctional.cat((x, y), dim=1)
+        x = self.cv3(x)
+        return x
 
 
 class SPP(nn.Module):
@@ -127,7 +150,9 @@ class SPP(nn.Module):
 
     def forward(self, x):
         x = self.cv1(x)
-        return self.cv2(self.catFunctional.cat([x] + [m(x) for m in self.m], 1))
+        x = self.catFunctional.cat([x] + [m(x) for m in self.m], 1)
+        x = self.cv2(x)
+        return x
 
 
 class Focus(nn.Module):
@@ -139,8 +164,9 @@ class Focus(nn.Module):
         self.catFunctional = nn.quantized.FloatFunctional()
 
     def forward(self, x):  # x(b,c,w,h) -> y(b,4c,w/2,h/2)
-        return self.conv(
-            self.catFunctional.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1))
+        x = self.catFunctional.cat([x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]], 1)
+        x = self.conv(x)
+        return x
         # return self.conv(self.contract(x))
 
 
@@ -180,7 +206,8 @@ class Concat(nn.Module):
         self.catFunctional = nn.quantized.FloatFunctional()
 
     def forward(self, x):
-        return self.catFunctional.cat(x, self.d)
+        x = self.catFunctional.cat(x, self.d)
+        return x
 
 
 class NMS(nn.Module):
@@ -332,5 +359,7 @@ class Classify(nn.Module):
         self.catFunctional = nn.quantized.FloatFunctional()
 
     def forward(self, x):
-        z = self.catFunctional.cat([self.aap(y) for y in (x if isinstance(x, list) else [x])], 1)  # cat if list
-        return self.flat(self.conv(z))  # flatten to x(b,c2)
+        x = self.catFunctional.cat([self.aap(y) for y in (x if isinstance(x, list) else [x])], 1)  # cat if list
+        x = self.conv(x)
+        x = self.flat(x)  # flatten to x(b,c2)
+        return x
