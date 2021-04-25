@@ -103,7 +103,7 @@ class Model(nn.Module):
         self.info()
         logger.info('')
 
-    def forward(self, x, augment=False, profile=False):
+    def forward(self, x, augment=False, profile=False, zeroPad=None, deQuant=None, quant=None):
         if augment:
             img_size = x.shape[-2:]  # height, width
             s = [1, 0.83, 0.67]  # scales
@@ -121,18 +121,20 @@ class Model(nn.Module):
                 y.append(yi)
             return torch.cat(y, 1), None  # augmented inference, train
         else:
-            return self.forward_once(x, profile)  # single-scale inference, train
+            return self.forward_once(x, profile, zeroPad, deQuant, quant)  # single-scale inference, train
 
-    def forward_once(self, x, profile=False):
+    def forward_once(self, x, profile=False, zeroPad=None, deQuant=None, quant=None):
         y, dt = [], []  # outputs
         for m in self.model:
             if type(m) == nn.Identity and hasattr(m, "breakHere"):
                 if m.breakHere:
                     if hasattr(m, "f"):
-                        x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
+                        x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in
+                                                                 m.f]  # from earlier layers
                     break
                 else:
-                    continue
+                    x = deQuant(x)
+                    m = zeroPad
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
@@ -146,6 +148,8 @@ class Model(nn.Module):
             # print(x)
             # print(m)
             x = m(x)  # run
+            if m == zeroPad:
+                x = quant(x)
             y.append(x if m.i in self.save else None)  # save output
 
         if profile:

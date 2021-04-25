@@ -65,10 +65,11 @@ def test(data,
         detectLayerIndex = 20
         model = Model(modelYaml)
     model.load_state_dict(tempModel.state_dict())
-    model.names = tempModel.names
+    with open("data/coco.yaml") as f:
+        names = yaml.load(f, Loader=yaml.FullLoader)['names']
+    model.names = names
     del tempModel
     maxStride = model.stride.max()
-    names = {k: v for k, v in enumerate(model.names if hasattr(model, 'names') else model.module.names)}
     imgsz = check_img_size(imgsz, s=maxStride)  # check img_size
     torch.set_num_threads(1)
     quantizationDataset = CustomDataSet(imgsz)
@@ -85,41 +86,66 @@ def test(data,
     quantize = True
     # ATTENTION: although you have defined
     if quantize:
-        newModel = NewModel(model, detectLayerIndex)
-        newModel.qconfig = torch.quantization.get_default_qconfig(backend)
-        newModel.quant.qconfig = torch.quantization.get_default_qconfig(backend)
-        for dequant in newModel.deQuant:
-            dequant.qconfig = torch.quantization.get_default_qconfig(backend)
-        for i in range(detectLayerIndex):
-            newModel.model.model[i].qconfig = torch.quantization.get_default_qconfig(backend)
+        if "yolov3-tiny.pt" in weights:
+            newModel = NewModelTiny(model)
 
-        # print(newModel)
-        newModel.eval()
-        #
-        mQuan = torch.quantization.prepare(newModel)
-        mQuan.eval()
-        for path, img, im0s, vid_cap in quantizationDataLoader:
-            # img = torch.from_numpy(img).to(device)
-            # img = img.float()  # uint8 to fp16/32
-            # img /= 255.0  # 0 - 255 to 0.0 - 1.0
-            # if img.ndimension() == 3:
-            #     img = img.unsqueeze(0)
+            newModel.qconfig = torch.quantization.get_default_qconfig(backend)
 
-            # Inference
-            _ = mQuan(img)
-            gc.collect()
-        mQuan = torch.quantization.convert(mQuan)
-        print(mQuan)
-        mQuan = NewModel2(model, detectLayerIndex, mQuan)
-        print("Quantization finished\n" + "******" * 10)
-        print("Original model:")
-        print_size_of_model(newModel)
-        print("Quantized:")
-        print_size_of_model(mQuan)
-        model = mQuan
+            newModel.eval()
 
-        # sys.exit(0)
-        # print(mQuan)
+            #
+            mQuan = torch.quantization.prepare(newModel)
+            newModelParent = NewModelTinyParent(model, mQuan)
+            newModelParent.eval()
+            count = 0
+            for path, img, im0s, vid_cap in quantizationDataLoader:
+                count += 1
+                # Inference
+                _ = newModelParent(img)
+                gc.collect()
+                if count == 100:
+                    break
+
+            mQuan = torch.quantization.convert(mQuan)
+            # print(mQuan)
+            mQuan = NewModelTinyParent(model, mQuan)
+            print("Quantization finished\n" + "******" * 10)
+            print("Original model:")
+            print_size_of_model(newModel)
+            print("Quantized:")
+            print_size_of_model(mQuan)
+            model = mQuan
+        else:
+            newModel = NewModel(model, detectLayerIndex)
+            newModel.qconfig = torch.quantization.get_default_qconfig(backend)
+            newModel.quant.qconfig = torch.quantization.get_default_qconfig(backend)
+            for dequant in newModel.deQuant:
+                dequant.qconfig = torch.quantization.get_default_qconfig(backend)
+            for i in range(detectLayerIndex):
+                newModel.model.model[i].qconfig = torch.quantization.get_default_qconfig(backend)
+
+            # print(newModel)
+            newModel.eval()
+            #
+            mQuan = torch.quantization.prepare(newModel)
+            mQuan.eval()
+            count = 0
+            for path, img, im0s, vid_cap in quantizationDataLoader:
+                count += 1
+                # Inference
+                _ = mQuan(img)
+                gc.collect()
+                if count == 100:
+                    break
+            mQuan = torch.quantization.convert(mQuan)
+            print(mQuan)
+            mQuan = NewModel2(model, detectLayerIndex, mQuan)
+            print("Quantization finished\n" + "******" * 10)
+            print("Original model:")
+            print_size_of_model(newModel)
+            print("Quantized:")
+            print_size_of_model(mQuan)
+            model = mQuan
 
     # Half
     half = False

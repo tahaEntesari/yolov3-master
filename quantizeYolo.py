@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import torch.backends.cudnn as cudnn
+import yaml
 from numpy import random
 
 from Utilities import *
@@ -40,14 +41,13 @@ def detect(save_img=False):
     tempModel = attempt_load(weights, map_location=device)  # load FP32 model
 
     if weights[0] == "yolov3.pt":
-        yaml = "./models/yolov3.yaml"
+        modelYaml = "./models/yolov3.yaml"
         detectLayerIndex = 28
-        model = Model(yaml)
+        model = Model(modelYaml)
     elif weights[0] == "yolov3-tiny.pt":
-        yaml = "./models/yolov3-tiny.yaml"
+        modelYaml = "./models/yolov3-tiny.yaml"
         detectLayerIndex = 20
-        model = Model(yaml)
-        print(model)
+        model = Model(modelYaml)
 
     # if "tiny" in weights[0].lower():
     #     detectLayerIndex = 20
@@ -59,7 +59,14 @@ def detect(save_img=False):
     # print(model.state_dict().keys())
     # sys.exit(0)
     model.load_state_dict(tempModel.state_dict())
-    model.names = tempModel.names
+
+
+    # Get names and colors
+
+    with open("data/coco.yaml") as f:
+        names = yaml.load(f, Loader=yaml.FullLoader)['names']
+    model.names = names
+    colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
 
     imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
     # Set Dataloader
@@ -125,7 +132,7 @@ def detect(save_img=False):
                 # _=model(img)
 
             mQuan = torch.quantization.convert(mQuan)
-            print(mQuan)
+            # print(mQuan)
             mQuan = NewModelTinyParent(model, mQuan)
             print("Quantization finished\n" + "******" * 10)
             print("Original model:")
@@ -163,7 +170,7 @@ def detect(save_img=False):
                 # Inference
                 _ = mQuan(img)
             mQuan = torch.quantization.convert(mQuan)
-            print(mQuan)
+            # print(mQuan)
             mQuan = NewModel2(model, detectLayerIndex, mQuan)
             print("Quantization finished\n" + "******" * 10)
             print("Original model:")
@@ -173,9 +180,7 @@ def detect(save_img=False):
             # sys.exit(0)
             # print(mQuan)
     ###################################################################################################################
-    # Get names and colors
-    names = model.module.names if hasattr(model, 'module') else model.names
-    colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
+
 
     # Run inference
     t0 = time.time()

@@ -62,35 +62,62 @@ class NewModelTiny(nn.Module):
         zeroPadLayerIndex = 11
         self.quant1 = torch.quantization.QuantStub()
         self.quant2 = torch.quantization.QuantStub()
-        self.model1 = copy.deepcopy(model)
-        self.model2 = copy.deepcopy(model)
-        for i in range(zeroPadLayerIndex, detectLayerIndex + 1):
-            self.model1.model[i] = nn.Identity()
-            self.model1.model[i].breakHere = True
-        for i in range(zeroPadLayerIndex + 1):
-            self.model2.model[i] = nn.Identity()
-            self.model2.model[i].breakHere = False
-        self.model2.model[detectLayerIndex] = nn.Identity()
-        self.model2.model[detectLayerIndex].breakHere = True
-        self.model2.model[detectLayerIndex].f = model.model[detectLayerIndex].f
+
+        self.model = copy.deepcopy(model)
+        self.model.model[zeroPadLayerIndex] = nn.Identity()
+        self.model.model[zeroPadLayerIndex].breakHere = False
+
+        self.model.model[detectLayerIndex] = nn.Identity()
+        self.model.model[detectLayerIndex].breakHere = True
+        self.model.model[detectLayerIndex].f = model.model[detectLayerIndex].f
+
         self.deQuant = torch.quantization.DeQuantStub()
 
     def forward(self, x, zeroPad, detect):
-        print(self.model1)
-        print("********************\n" * 10)
-        print(self.model2)
         x = self.quant1(x)
-        x = self.model1(x)
-        x = self.deQuant(x)
-        print(x.shape)
-        x = zeroPad(x)
-        print(x.shape)
-        x = self.quant2(x)
-        x = self.model2(x)
+        x = self.model(x, zeroPad=zeroPad, deQuant=self.deQuant, quant=self.quant2)
         for i in range(len(x)):
             x[i] = self.deQuant(x[i])
         x = detect(x)
         return x
+
+
+# class NewModelTiny(nn.Module):
+#     def __init__(self, model):
+#         super(NewModelTiny, self).__init__()
+#         detectLayerIndex = 20
+#         zeroPadLayerIndex = 11
+#         self.quant1 = torch.quantization.QuantStub()
+#         self.quant2 = torch.quantization.QuantStub()
+#         self.model1 = copy.deepcopy(model)
+#         self.model2 = copy.deepcopy(model)
+#         for i in range(zeroPadLayerIndex, detectLayerIndex + 1):
+#             self.model1.model[i] = nn.Identity()
+#             self.model1.model[i].breakHere = True
+#         for i in range(zeroPadLayerIndex + 1):
+#             self.model2.model[i] = nn.Identity()
+#             self.model2.model[i].breakHere = False
+#         self.model2.model[detectLayerIndex] = nn.Identity()
+#         self.model2.model[detectLayerIndex].breakHere = True
+#         self.model2.model[detectLayerIndex].f = model.model[detectLayerIndex].f
+#         self.deQuant = torch.quantization.DeQuantStub()
+#
+#     def forward(self, x, zeroPad, detect):
+#         print(self.model1)
+#         print("********************\n" * 10)
+#         print(self.model2)
+#         x = self.quant1(x)
+#         x = self.model1(x)
+#         x = self.deQuant(x)
+#         print(x.shape)
+#         x = zeroPad(x)
+#         print(x.shape)
+#         x = self.quant2(x)
+#         x = self.model2(x)
+#         for i in range(len(x)):
+#             x[i] = self.deQuant(x[i])
+#         x = detect(x)
+#         return x
 
 
 class NewModel2(nn.Module):
