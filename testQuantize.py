@@ -68,6 +68,7 @@ def test(data,
     with open("data/coco.yaml") as f:
         names = yaml.load(f, Loader=yaml.FullLoader)['names']
     model.names = names
+    names = {k: v for k, v in enumerate(names)}
     del tempModel
     maxStride = model.stride.max()
     imgsz = check_img_size(imgsz, s=maxStride)  # check img_size
@@ -83,7 +84,7 @@ def test(data,
     # sys.exit(0)
 
     #
-    quantize = True
+    quantize = False
     # ATTENTION: although you have defined
     if quantize:
         if "yolov3-tiny.pt" in weights:
