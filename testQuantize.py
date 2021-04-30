@@ -41,7 +41,8 @@ def test(data,
          save_hybrid=False,  # for hybrid auto-labelling
          save_conf=False,  # save auto-label confidences
          plots=True,
-         log_imgs=0):  # number of logged images
+         log_imgs=0,
+         quantize=False):  # number of logged images
 
     # Initialize/load model and set device
     training = False
@@ -84,7 +85,6 @@ def test(data,
     # sys.exit(0)
 
     #
-    quantize = False
     # ATTENTION: although you have defined
     if quantize:
         if "yolov3-tiny.pt" in weights:
@@ -384,6 +384,7 @@ if __name__ == '__main__':
     parser.add_argument('--project', default='runs/test', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
+    parser.add_argument('--quantize', action='store_true', help='quantize model')
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.data = check_file(opt.data)  # check file
@@ -404,6 +405,7 @@ if __name__ == '__main__':
              save_txt=opt.save_txt | opt.save_hybrid,
              save_hybrid=opt.save_hybrid,
              save_conf=opt.save_conf,
+             quantize=opt.quantize,
              )
 
     elif opt.task == 'study':  # run over a range of settings and save/plot

@@ -40,34 +40,33 @@ def detect(save_img=False):
         weights = [weights]
     tempModel = attempt_load(weights, map_location=device)  # load FP32 model
 
+    quantize = opt.quantize
     if weights[0] == "yolov3.pt":
         modelYaml = "./models/yolov3.yaml"
         detectLayerIndex = 28
-        model = Model(modelYaml)
+        datasetYaml = "data/coco.yaml"
     elif weights[0] == "yolov3-tiny.pt":
         modelYaml = "./models/yolov3-tiny.yaml"
         detectLayerIndex = 20
-        model = Model(modelYaml)
-
-    # if "tiny" in weights[0].lower():
-    #     detectLayerIndex = 20
-    # else:
-    #     detectLayerIndex = 28
-    # model = attempt_load(weights, map_location=device)
-
-    # print(tempModel.state_dict().keys())
-    # print(model.state_dict().keys())
-    # sys.exit(0)
-    model.load_state_dict(tempModel.state_dict())
-
-
-    # Get names and colors
-
-    with open("data/coco.yaml") as f:
-        names = yaml.load(f, Loader=yaml.FullLoader)['names']
-    model.names = names
+        datasetYaml = "data/coco.yaml"
+    elif weights[0] == "yolov3HumanActivity.pt":
+        modelYaml = "./models/yolov3.yaml"
+        detectLayerIndex = 28
+        datasetYaml = "data/VOC2012_NoWalking.yaml"
+    with open(datasetYaml) as f:
+        loadedYaml = yaml.load(f, Loader=yaml.FullLoader)
+        names = loadedYaml['names']
+        nc = loadedYaml['nc']
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
 
+    model = Model(modelYaml, nc=nc)
+    model.load_state_dict(tempModel.state_dict())
+    model.names = names
+    if quantize:
+        floatModel = Model(modelYaml, nc=nc)
+        floatModel.load_state_dict(tempModel.state_dict())
+        floatModel.names = names
+        floatModel.eval()
     imgsz = check_img_size(imgsz, s=model.stride.max())  # check img_size
     # Set Dataloader
     vid_path, vid_writer = None, None
@@ -80,13 +79,6 @@ def detect(save_img=False):
         dataset = LoadImages(source, img_size=imgsz)
 
     ###################################################################################################################
-
-    ###################################################################################################################
-    # it seems that this is not necessary
-    # model.qconfig = torch.quantization.get_default_qconfig(backend)
-    # for i in range(28):
-    #     model.model[i].qconfig = torch.quantization.get_default_qconfig(backend)
-    # model.qconfig = torch.quantization.get_default_qconfig(backend)
     # """
     # VERY IMPORTANT LINE:
     # """
@@ -98,7 +90,6 @@ def detect(save_img=False):
     # sys.exit(0)
 
     #
-    quantize = True
     # ATTENTION: although you have defined
     if not quantize:
         model.eval()
@@ -150,7 +141,6 @@ def detect(save_img=False):
             for i in range(detectLayerIndex):
                 newModel.model.model[i].qconfig = torch.quantization.get_default_qconfig(backend)
 
-
             # print(newModel)
             newModel.eval()
             #
@@ -181,7 +171,6 @@ def detect(save_img=False):
             # print(mQuan)
     ###################################################################################################################
 
-
     # Run inference
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
@@ -194,7 +183,6 @@ def detect(save_img=False):
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
-
         # Inference
         t1 = time_synchronized()
         pred = model(img)[0]
@@ -267,6 +255,9 @@ def detect(save_img=False):
     print(f'Done. ({time.time() - t0:.3f}s)')
 
 
+def predictAndBound():
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', nargs='+', type=str, default='yolov3.pt', help='model.pt path(s)')
@@ -285,6 +276,7 @@ if __name__ == '__main__':
     parser.add_argument('--project', default='runs/detect', help='save results to project/name')
     parser.add_argument('--name', default='exp', help='save results to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
+    parser.add_argument('--quantize', action='store_true', help='quantize model')
     opt = parser.parse_args()
     print(opt)
     check_requirements()
