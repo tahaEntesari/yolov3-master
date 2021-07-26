@@ -8,8 +8,9 @@ import yaml
 from tqdm import tqdm
 
 from Utilities import *
+from models.common import Bottleneck
 from models.experimental import attempt_load
-from models.yolo import Model
+from models.yolo import Model, Detect
 from utils.datasets import create_dataloader
 from utils.general import coco80_to_coco91_class, check_dataset, check_file, check_img_size, check_requirements, \
     box_iou, non_max_suppression, scale_coords, xyxy2xywh, xywh2xyxy, set_logging, increment_path, colorstr
@@ -42,8 +43,8 @@ def test(data,
          save_conf=False,  # save auto-label confidences
          plots=True,
          log_imgs=0,
-         quantize=False):  # number of logged images
-
+         quantize=False,
+         prunedLayers=[]):
     # Initialize/load model and set device
     training = False
 
@@ -57,16 +58,61 @@ def test(data,
     # Load model
     # model = attempt_load(weights, map_location=device)  # load FP32 model
     tempModel = attempt_load(weights, map_location=device)  # load FP32 model
+    isTiny = False
     if weights[0] == "yolov3.pt":
         modelYaml = "./models/yolov3.yaml"
         detectLayerIndex = 28
-        model = Model(modelYaml)
-    elif weights[0] == "yolov3-tiny.pt":
+        nc = 80
+        datasetYaml = "data/coco.yaml"
+    elif weights[0] in ["yolov3-tiny.pt", "yolov3TinyHuman.pt"]:
+        isTiny = True
         modelYaml = "./models/yolov3-tiny.yaml"
         detectLayerIndex = 20
-        model = Model(modelYaml)
+        if "human" in weights[0].lower():
+            nc = 10
+        else:
+            nc = 80
+        datasetYaml = "data/coco.yaml"
+    elif weights[0] in ["yolov3HumanActivity.pt", "NoWalking_2500_lrf0.09.pt"] or "prune" in weights[0]:
+        if "tiny" in weights[0]:
+            isTiny = True
+            modelYaml = "./models/yolov3-tiny.yaml"
+            detectLayerIndex = 20
+        else:
+            modelYaml = "./models/yolov3.yaml"
+            detectLayerIndex = 28
+        nc = 10
+        datasetYaml = "data/VOC2012_NoWalking.yaml"
+        data = datasetYaml
+    model = Model(modelYaml, nc=nc)
+    if prunedLayers:
+        for layerNumber in range(detectLayerIndex + 1):
+            # replace the necessary ones in that layer
+            currentLayerType = type(model.model[layerNumber])
+            if currentLayerType == Bottleneck:
+                replacePruneModuleBottleneck(model.model[layerNumber], tempModel.model[layerNumber])
+            elif currentLayerType == nn.Sequential:
+                replacePruneModuleSequential(model.model[layerNumber], tempModel.model[layerNumber])
+            elif currentLayerType == Conv:
+                model.model[layerNumber].conv = tempModel.model[layerNumber].conv
+                model.model[layerNumber].bn = tempModel.model[layerNumber].bn
+
+            if layerNumber != detectLayerIndex:
+                # replace the first component of the next layer
+                nextLayerType = type(model.model[layerNumber + 1])
+                if nextLayerType == Bottleneck:
+                    model.model[layerNumber + 1].cv1.conv = tempModel.model[layerNumber + 1].cv1.conv
+                elif nextLayerType == Conv:
+                    model.model[layerNumber + 1].conv = tempModel.model[layerNumber + 1].conv
+                elif nextLayerType == nn.Sequential:
+                    model.model[layerNumber + 1][0].cv1.conv = tempModel.model[layerNumber + 1][0].cv1.conv
+                elif nextLayerType == Detect:
+                    for i in range(len(list(model.model[detectLayerIndex].children())[0])):
+                        model.model[layerNumber + 1].m[i] = tempModel.model[layerNumber + 1].m[i]
+
     model.load_state_dict(tempModel.state_dict())
-    with open("data/coco.yaml") as f:
+
+    with open(datasetYaml) as f:
         names = yaml.load(f, Loader=yaml.FullLoader)['names']
     model.names = names
     names = {k: v for k, v in enumerate(names)}
@@ -87,7 +133,7 @@ def test(data,
     #
     # ATTENTION: although you have defined
     if quantize:
-        if "yolov3-tiny.pt" in weights:
+        if isTiny:
             newModel = NewModelTiny(model)
 
             newModel.qconfig = torch.quantization.get_default_qconfig(backend)
@@ -117,6 +163,7 @@ def test(data,
             print_size_of_model(mQuan)
             model = mQuan
         else:
+            # elif weights[0] in ["yolov3HumanActivity.pt", "NoWalking_2500_lrf0.09.pt"] or "prune" in weights[0]:
             newModel = NewModel(model, detectLayerIndex)
             newModel.qconfig = torch.quantization.get_default_qconfig(backend)
             newModel.quant.qconfig = torch.quantization.get_default_qconfig(backend)
@@ -139,7 +186,6 @@ def test(data,
                 if count == 100:
                     break
             mQuan = torch.quantization.convert(mQuan)
-            print(mQuan)
             mQuan = NewModel2(model, detectLayerIndex, mQuan)
             print("Quantization finished\n" + "******" * 10)
             print("Original model:")
@@ -148,14 +194,17 @@ def test(data,
             print_size_of_model(mQuan)
             model = mQuan
 
+    torch.save(model.quantizedNewModel.state_dict(), "quantizedPrunedWeightsYoloTiny.pth")
+
     # Half
     half = False
     print(data)
     is_coco = data.endswith('coco.yaml')  # is COCO dataset
     with open(data) as f:
         data = yaml.load(f, Loader=yaml.FullLoader)  # model dict
-    check_dataset(data)  # check
     nc = 1 if single_cls else int(data['nc'])  # number of classes
+    check_dataset(data)  # check
+
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
     niou = iouv.numel()
 
@@ -183,6 +232,7 @@ def test(data,
     loss = torch.zeros(3, device=device)
     jdict, stats, ap, ap_class, wandb_images = [], [], [], [], []
     for batch_i, (img, targets, paths, shapes) in enumerate(tqdm(dataloader, desc=s)):
+
         img = img.to(device, non_blocking=True)
         img = img.half() if half else img.float()  # uint8 to fp16/32
         img /= 255.0  # 0 - 255 to 0.0 - 1.0
@@ -385,11 +435,18 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quantize', action='store_true', help='quantize model')
+    parser.add_argument(
+        "--prunedLayers",  # name on the CLI - drop the `--` for positional/required parameters
+        nargs="*",  # 0 or more values expected => creates a list
+        type=int,
+        default=[],  # default if nothing is provided
+    )
     opt = parser.parse_args()
     opt.save_json |= opt.data.endswith('coco.yaml')
     opt.data = check_file(opt.data)  # check file
     print(opt)
     check_requirements()
+
 
     if opt.task in ['val', 'test']:  # run normally
         test(opt.data,
@@ -406,6 +463,7 @@ if __name__ == '__main__':
              save_hybrid=opt.save_hybrid,
              save_conf=opt.save_conf,
              quantize=opt.quantize,
+             prunedLayers=opt.prunedLayers,
              )
 
     elif opt.task == 'study':  # run over a range of settings and save/plot

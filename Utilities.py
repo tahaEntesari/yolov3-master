@@ -191,3 +191,15 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scale
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
     return img, ratio, (dw, dh)
+
+
+def replacePruneModuleBottleneck(originalModel, prunedModel):
+    originalModel.cv1.conv = prunedModel.cv1.conv
+    originalModel.cv1.bn = prunedModel.cv1.bn
+    originalModel.cv2.conv = prunedModel.cv2.conv
+    originalModel.cv2.bn = prunedModel.cv2.bn
+
+
+def replacePruneModuleSequential(originalModel, prunedModel):
+    for i in range(len(originalModel)):
+        replacePruneModuleBottleneck(originalModel[i], prunedModel[i])

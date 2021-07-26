@@ -21,7 +21,10 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 import test  # import test.py to get mAP after each epoch
+from models.common import Bottleneck
+from models.common import Conv
 from models.experimental import attempt_load
+from models.yolo import Detect
 from models.yolo import Model
 from utils.autoanchor import check_anchors
 from utils.datasets import create_dataloader
@@ -35,11 +38,24 @@ from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_di
 
 logger = logging.getLogger(__name__)
 
+def replacePruneModuleBottleneck(originalModel, prunedModel):
+    originalModel.cv1.conv = prunedModel.cv1.conv
+    originalModel.cv1.bn = prunedModel.cv1.bn
+    originalModel.cv2.conv = prunedModel.cv2.conv
+    originalModel.cv2.bn = prunedModel.cv2.bn
+
+
+def replacePruneModuleSequential(originalModel, prunedModel):
+    for i in range(len(originalModel)):
+        replacePruneModuleBottleneck(originalModel[i], prunedModel[i])
+
 
 def train(hyp, opt, device, tb_writer=None, wandb=None):
     logger.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
     save_dir, epochs, batch_size, total_batch_size, weights, rank = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank
+
+    prunedLayers = opt.prunedLayers
 
     # Directories
     wdir = save_dir / 'weights'
@@ -70,7 +86,31 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
 
     # Model
     pretrained = weights.endswith('.pt')
-    if pretrained:
+    if prunedLayers:
+        model = Model(opt.cfg, ch=3, nc=nc).to(device)
+        tempModel = attempt_load(weights, map_location=device)  # load FP32 model
+        for layerNumber in prunedLayers:
+            # replace the necessary ones in that layer
+            currentLayerType = type(model.model[layerNumber])
+            if currentLayerType == Bottleneck:
+                replacePruneModuleBottleneck(model.model[layerNumber], tempModel.model[layerNumber])
+            elif currentLayerType == nn.Sequential:
+                replacePruneModuleSequential(model.model[layerNumber], tempModel.model[layerNumber])
+
+            # replace the first component of the next layer
+            nextLayerType = type(model.model[layerNumber + 1])
+            if nextLayerType == Bottleneck:
+                model.model[layerNumber + 1].cv1.conv = tempModel.model[layerNumber + 1].cv1.conv
+            elif nextLayerType == Conv:
+                model.model[layerNumber + 1].conv = tempModel.model[layerNumber + 1].conv
+            elif nextLayerType == nn.Sequential:
+                model.model[layerNumber + 1][0].cv1.conv = tempModel.model[layerNumber + 1][0].cv1.conv
+            elif nextLayerType == Detect:
+                model.model[layerNumber + 1].m[0] = tempModel.model[layerNumber + 1].m[0]
+        model.load_state_dict(tempModel.state_dict())
+        print("Printing new model")
+        print(model)
+    elif pretrained:
         with torch_distributed_zero_first(rank):
             attempt_download(weights)  # download if not found locally
         ckpt = torch.load(weights, map_location=device)  # load checkpoint
@@ -460,6 +500,12 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='exp', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     parser.add_argument('--quad', action='store_true', help='quad dataloader')
+    parser.add_argument(
+        "--prunedLayers",  # name on the CLI - drop the `--` for positional/required parameters
+        nargs="*",  # 0 or more values expected => creates a list
+        type=int,
+        default=[],  # default if nothing is provided
+    )
     opt = parser.parse_args()
 
     # Set DDP variables
